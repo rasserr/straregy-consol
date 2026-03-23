@@ -422,6 +422,9 @@ class Executor:
                 self._handle_api_failure()
             return []
         except Exception as exc:
+            if isinstance(exc, RuntimeError) and "event loop" in str(exc):
+                logger.debug("[Executor] get_open_positions skipped — cross-loop call")
+                return []
             logger.error("[Executor] get_open_positions error: %s", exc)
             self._handle_api_failure()
             return []
@@ -443,6 +446,9 @@ class Executor:
                 self._handle_api_failure()
             return []
         except Exception as exc:
+            if isinstance(exc, RuntimeError) and "event loop" in str(exc):
+                logger.debug("[Executor] get_open_orders skipped — cross-loop call")
+                return []
             logger.error("[Executor] get_open_orders error: %s", exc)
             self._handle_api_failure()
             return []
@@ -495,6 +501,9 @@ class Executor:
                 self._handle_api_failure()
             return self._store.get_account_balance()
         except Exception as exc:
+            if isinstance(exc, RuntimeError) and "event loop" in str(exc):
+                logger.debug("[Executor] get_account_balance skipped — cross-loop call")
+                return self._store.get_account_balance()
             logger.error("[Executor] get_account_balance error: %s", exc)
             self._handle_api_failure()
             return self._store.get_account_balance()
