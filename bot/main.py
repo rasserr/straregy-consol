@@ -760,6 +760,12 @@ class Engine:
                                     f"거래 수: `{total_trades}`회\n"
                                     f"레짐: `{(self._store.get_regime() or {}).get('regime','UNKNOWN')}`"
                                 )
+                                # 전략 건강도 카드 추가
+                                if self._strategy_manager is not None:
+                                    he = self._strategy_manager.health_engine
+                                    if he is not None:
+                                        card = he.build_health_card("오늘")
+                                        await self._telegram.send_message(card)
 
                             elif cq_data == "cmd:report_weekly":
                                 await answer_callback(cq_id)
@@ -774,6 +780,12 @@ class Engine:
                                 await self._telegram.send_message(
                                     "\n".join(lines) if len(lines) > 1 else "데이터 없음"
                                 )
+                                # 전략 건강도 카드 추가
+                                if self._strategy_manager is not None:
+                                    he = self._strategy_manager.health_engine
+                                    if he is not None:
+                                        card = he.build_health_card("주간")
+                                        await self._telegram.send_message(card)
 
                             continue  # callback_query 처리 완료, message 처리 건너뜀
 
@@ -1079,6 +1091,12 @@ class Engine:
                                     f"거래 수: `{total_trades}`회\n"
                                     f"레짐: `{(self._store.get_regime() or {}).get('regime','UNKNOWN')}`"
                                 )
+                            # 건강도 카드 항상 추가
+                            if self._strategy_manager is not None:
+                                he = self._strategy_manager.health_engine
+                                if he is not None:
+                                    card = he.build_health_card("오늘")
+                                    await self._telegram.send_message(card)
 
                         # ── /report_weekly ────────────────────────────────
                         elif text == "/report_weekly":
@@ -1098,6 +1116,12 @@ class Engine:
                                         f"PF:{st.get('profit_factor','—')}"
                                     )
                                 await self._telegram.send_message("\n".join(lines) if lines else "데이터 없음")
+                            # 건강도 카드 항상 추가
+                            if self._strategy_manager is not None:
+                                he = self._strategy_manager.health_engine
+                                if he is not None:
+                                    card = he.build_health_card("주간")
+                                    await self._telegram.send_message(card)
 
                 except asyncio.CancelledError:
                     break

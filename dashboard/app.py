@@ -197,6 +197,16 @@ def create_app(
                     "expectancy":    0.0,
                     "open_count":    0,
                 })
+                # Phase E — health info from strategy_state
+                state = store.get_strategy_state(name) or {}
+                s["health"] = {
+                    "health_status":     state.get("health_status", "UNKNOWN"),
+                    "recent_10_pf":      state.get("recent_10_pf"),
+                    "recent_20_pf":      state.get("recent_20_pf"),
+                    "recent_mdd":        state.get("recent_mdd"),
+                    "live_eligibility":  state.get("live_eligibility", 0),
+                    "last_pause_reason": state.get("last_pause_reason"),
+                }
         else:
             strategies = []
         return JSONResponse(strategies)

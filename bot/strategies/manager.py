@@ -26,6 +26,7 @@ from bot.strategies.paper_recorder import PaperRecorder
 from bot.strategies.opportunity import OpportunityNormalizer, Opportunity
 from bot.strategies.scoring import ScoringEngine
 from bot.strategies.opportunity_queue import OpportunityQueue
+from bot.strategies.strategy_health import StrategyHealthEngine
 
 # v1.3 새 전략 3개
 from bot.strategies.overreaction_reversal import OverreactionReversalStrategy
@@ -74,11 +75,17 @@ class StrategyManager:
 
         self._state: Dict[str, dict] = {}
 
+        # Phase E — Strategy Health Engine (initialized after manager is fully set up)
+        self._health_engine: Optional["StrategyHealthEngine"] = None
+
     # ---------------------------------------------------------------------- #
     # Initialization
     # ---------------------------------------------------------------------- #
 
     def initialize(self) -> None:
+        # Health engine needs 'self' to be fully constructed first
+        self._health_engine = StrategyHealthEngine(self._store, self)
+
         for strategy in self._strategies:
             existing = self._store.get_strategy_state(strategy.name)
             if existing is None:
@@ -192,6 +199,10 @@ class StrategyManager:
         # TP/SL 체크
         self._recorder.check_positions()
 
+        # Phase E — Strategy Health check (15분 주기)
+        if self._health_engine is not None:
+            self._health_engine.run_health_check()
+
         return all_signals
 
     # ---------------------------------------------------------------------- #
@@ -205,6 +216,10 @@ class StrategyManager:
     @property
     def recorder(self) -> PaperRecorder:
         return self._recorder
+
+    @property
+    def health_engine(self) -> Optional["StrategyHealthEngine"]:
+        return self._health_engine
 
     @property
     def opp_queue(self) -> OpportunityQueue:
