@@ -1109,34 +1109,67 @@ class DataStore:
     def update_recommendation(
         self,
         rec_id: str,
-        status: str,
-        reason: str,
-        decided_by: str,
+        updates_or_status,
+        reason: str = "",
+        decided_by: str = "",
     ) -> bool:
         """
-        Update a recommendation's status after a decision (approve/reject/defer).
+        Update recommendation fields.
+        Accepts either:
+          update_recommendation(rec_id, status_str, reason, decided_by)  — legacy
+          update_recommendation(rec_id, {"status": ..., "decided_by": ...})  — dict
         Returns True on success.
         """
+        if isinstance(updates_or_status, dict):
+            updates = updates_or_status
+        else:
+            updates = {
+                "status":          updates_or_status,
+                "decision_reason": reason,
+                "decided_by":      decided_by,
+                "decided_at":      int(time.time() * 1000),
+            }
+
+        allowed = {"status", "decision_reason", "decided_by", "decided_at"}
+        fields = {k: v for k, v in updates.items() if k in allowed and v is not None}
+        if not fields:
+            return False
+
+        set_clause = ", ".join(f"{k} = ?" for k in fields)
+        values = list(fields.values()) + [rec_id]
         try:
             self._conn.execute(
-                """
-                UPDATE recommendations
-                SET status = ?, decision_reason = ?, decided_by = ?, decided_at = ?
-                WHERE id = ?
-                """,
-                (status, reason, decided_by, int(time.time() * 1000), rec_id),
+                f"UPDATE recommendations SET {set_clause} WHERE id = ?", values
             )
             self._conn.commit()
-            self._broadcast("recommendation_decided", {
-                "id":         rec_id,
-                "status":     status,
-                "reason":     reason,
-                "decided_by": decided_by,
-            })
+            self._broadcast("recommendation_decided", {"id": rec_id, **fields})
             return True
         except Exception as exc:
             logger.error("SQLite recommendation update error: %s", exc)
             return False
+
+    def get_recommendation(self, rec_id: str) -> Optional[dict]:
+        """단건 추천 조회."""
+        try:
+            row = self._conn.execute(
+                "SELECT * FROM recommendations WHERE id = ?", (rec_id,)
+            ).fetchone()
+            return self._deserialize_recommendation(dict(row)) if row else None
+        except Exception as exc:
+            logger.error("SQLite get_recommendation error: %s", exc)
+            return None
+
+    def get_recommendations(self, status: str = "PENDING", limit: int = 10) -> List[dict]:
+        """상태별 추천 목록."""
+        try:
+            rows = self._conn.execute(
+                "SELECT * FROM recommendations WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+            return [self._deserialize_recommendation(dict(r)) for r in rows]
+        except Exception as exc:
+            logger.error("SQLite get_recommendations error: %s", exc)
+            return []
 
     def get_pending_recommendations(self) -> List[dict]:
         """Return all recommendations with status=PENDING."""

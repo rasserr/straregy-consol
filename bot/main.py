@@ -48,6 +48,7 @@ from bot.notifications.telegram import TelegramNotifier
 from bot.regime.detector import RegimeDetector
 from bot.regime.fast_layer import FastLayer
 from bot.strategies.manager import StrategyManager
+from bot.strategies.approval_manager import ApprovalManager
 from bot.execution.kill_switch import KillSwitch
 from bot.execution.state_machine import OrderStateMachine
 from bot.execution.risk_manager import RiskManager
@@ -100,6 +101,7 @@ class Engine:
         self._collector: Optional[BinanceCollector] = None
         self._detector: Optional[RegimeDetector] = None
         self._fast_layer: Optional[FastLayer] = None
+        self._approval_manager: Optional[ApprovalManager] = None
         self._telegram: Optional[TelegramNotifier] = None
         self._strategy_manager: Optional[StrategyManager] = None
 
@@ -206,9 +208,13 @@ class Engine:
         self._detector = RegimeDetector(self._store)
         self._fast_layer = FastLayer(self._store)
 
-        # 6. Strategy Manager (Phase 2)
+        # 6. Strategy Manager (Phase 2) + Approval Manager
         self._strategy_manager = StrategyManager(self._store)
         self._strategy_manager.initialize()
+        self._approval_manager = ApprovalManager(self._store, self._strategy_manager)
+        # Health Engine에 ApprovalManager 주입
+        if self._strategy_manager.health_engine is not None:
+            self._strategy_manager.health_engine.set_approval_manager(self._approval_manager)
         logger.info(
             "StrategyManager initialized with %d strategies",
             len(self._strategy_manager.get_strategy_list()),
@@ -1224,6 +1230,78 @@ class Engine:
                                 if he is not None:
                                     card = he.build_health_card("주간")
                                     await self._telegram.send_message(card)
+
+                        # ── /universe ─────────────────────────────────────
+                        elif text == "/universe":
+                            if self._strategy_manager is not None:
+                                txt = self._strategy_manager.universe.build_summary_text()
+                                await self._telegram.send_message(txt)
+                            else:
+                                await self._telegram.send_message("전략 관리자가 초기화되지 않았습니다.")
+
+                        # ── /pending ──────────────────────────────────────
+                        elif text == "/pending":
+                            if self._approval_manager is not None:
+                                card = self._approval_manager.build_pending_card()
+                                await self._telegram.send_message(card)
+                            else:
+                                await self._telegram.send_message("승인 관리자가 초기화되지 않았습니다.")
+
+                        # ── /approve <id> ─────────────────────────────────
+                        elif text.startswith("/approve"):
+                            if self._approval_manager is None:
+                                await self._telegram.send_message("승인 관리자가 초기화되지 않았습니다.")
+                            else:
+                                rec_id_arg = parts[1] if len(parts) > 1 else ""
+                                if not rec_id_arg:
+                                    await self._telegram.send_message("사용법: `/approve <추천ID>`")
+                                else:
+                                    # ID prefix로 full ID 검색
+                                    pending = self._approval_manager.get_pending_recommendations()
+                                    matched = [r for r in pending if r.get("id", "").startswith(rec_id_arg)]
+                                    if not matched:
+                                        await self._telegram.send_message(f"❌ 추천 `{rec_id_arg}` 를 찾을 수 없습니다.")
+                                    else:
+                                        result = self._approval_manager.approve_recommendation(
+                                            matched[0]["id"],
+                                            decided_by=f"telegram:{chat_id}",
+                                        )
+                                        msg = result.get("msg", "")
+                                        if result.get("pending"):
+                                            # Level 3: 2단계 확인 요청
+                                            await self._telegram.send_message(msg)
+                                        else:
+                                            await self._telegram.send_message(msg)
+
+                        # ── /confirm ──────────────────────────────────────
+                        elif text == "/confirm":
+                            if self._approval_manager is None:
+                                await self._telegram.send_message("승인 관리자가 초기화되지 않았습니다.")
+                            else:
+                                result = self._approval_manager.execute_confirmed(
+                                    operator=f"telegram:{chat_id}"
+                                )
+                                await self._telegram.send_message(result.get("msg", "처리 완료"))
+
+                        # ── /reject <id> ──────────────────────────────────
+                        elif text.startswith("/reject"):
+                            if self._approval_manager is None:
+                                await self._telegram.send_message("승인 관리자가 초기화되지 않았습니다.")
+                            else:
+                                rec_id_arg = parts[1] if len(parts) > 1 else ""
+                                if not rec_id_arg:
+                                    await self._telegram.send_message("사용법: `/reject <추천ID>`")
+                                else:
+                                    pending = self._approval_manager.get_pending_recommendations()
+                                    matched = [r for r in pending if r.get("id", "").startswith(rec_id_arg)]
+                                    if not matched:
+                                        await self._telegram.send_message(f"❌ 추천 `{rec_id_arg}` 를 찾을 수 없습니다.")
+                                    else:
+                                        result = self._approval_manager.reject_recommendation(
+                                            matched[0]["id"],
+                                            decided_by=f"telegram:{chat_id}",
+                                        )
+                                        await self._telegram.send_message(result.get("msg", ""))
 
                 except asyncio.CancelledError:
                     break

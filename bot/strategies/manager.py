@@ -27,6 +27,7 @@ from bot.strategies.opportunity import OpportunityNormalizer, Opportunity
 from bot.strategies.scoring import ScoringEngine
 from bot.strategies.opportunity_queue import OpportunityQueue
 from bot.strategies.strategy_health import StrategyHealthEngine
+from bot.market.symbol_universe import SymbolUniverse
 
 # v1.3 새 전략 3개
 from bot.strategies.overreaction_reversal import OverreactionReversalStrategy
@@ -78,6 +79,9 @@ class StrategyManager:
         # Phase E — Strategy Health Engine (initialized after manager is fully set up)
         self._health_engine: Optional["StrategyHealthEngine"] = None
 
+        # Symbol Universe
+        self._universe = SymbolUniverse()
+
     # ---------------------------------------------------------------------- #
     # Initialization
     # ---------------------------------------------------------------------- #
@@ -85,6 +89,13 @@ class StrategyManager:
     def initialize(self) -> None:
         # Health engine needs 'self' to be fully constructed first
         self._health_engine = StrategyHealthEngine(self._store, self)
+
+        # Symbol Universe — config에서 심볼 목록 로드
+        try:
+            from bot.config import get_config
+            self._universe.initialize_from_config(get_config().tracked_symbols)
+        except Exception:
+            pass
 
         for strategy in self._strategies:
             existing = self._store.get_strategy_state(strategy.name)
@@ -181,7 +192,20 @@ class StrategyManager:
             all_signals.extend(signals)
 
         # ── Top-N → PaperRecorder ─────────────────────────────────────── #
+        # 기본 min_score=8, 심볼 계층에 따라 개별 필터링
         top_opps = self._opp_queue.top_n(n=2, min_score=8)
+        filtered_opps = []
+        for opp in top_opps:
+            sym_cfg = self._universe.get_symbol_config(opp.symbol)
+            if opp.score_total >= sym_cfg["min_score"]:
+                filtered_opps.append(opp)
+            else:
+                logger.debug(
+                    "[Universe] '%s' score=%d < tier%d min_score=%d — skipped",
+                    opp.symbol, opp.score_total, sym_cfg["tier"], sym_cfg["min_score"],
+                )
+        top_opps = filtered_opps
+
         for opp in top_opps:
             # PENDING 상태만 처리 (중복 방지)
             if opp.execution_status != "PENDING":
@@ -224,6 +248,10 @@ class StrategyManager:
     @property
     def recorder(self) -> PaperRecorder:
         return self._recorder
+
+    @property
+    def universe(self) -> SymbolUniverse:
+        return self._universe
 
     @property
     def health_engine(self) -> Optional["StrategyHealthEngine"]:

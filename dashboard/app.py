@@ -771,6 +771,23 @@ def create_app(
 
         return JSONResponse({"source": "none", "metrics": {}, "equity_curve": []})
 
+    @app.get("/api/universe")
+    async def api_universe():
+        """Return symbol universe tier information."""
+        if strategy_manager is not None and hasattr(strategy_manager, "universe"):
+            return JSONResponse(strategy_manager.universe.to_dict())
+        return JSONResponse([])
+
+    @app.get("/api/pending-approvals")
+    async def api_pending_approvals():
+        """Return pending recommendation approvals."""
+        try:
+            rows = store.get_recommendations(status="PENDING", limit=20)
+            return JSONResponse(rows)
+        except Exception as exc:
+            logger.warning("[Dashboard] pending approvals error: %s", exc)
+            return JSONResponse([])
+
     # ------------------------------------------------------------------ #
     # Strategy mode management
     # ------------------------------------------------------------------ #

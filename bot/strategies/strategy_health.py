@@ -53,6 +53,12 @@ class StrategyHealthEngine:
         self._manager = manager
         self._last_check_ts: int = 0
         self._CHECK_INTERVAL_MS = 15 * 60 * 1000  # 15분마다 실행
+        # ApprovalManager는 순환 의존 방지를 위해 외부 주입
+        self._approval_manager = None
+
+    def set_approval_manager(self, approval_manager) -> None:
+        """ApprovalManager 주입 (circular dependency 방지)."""
+        self._approval_manager = approval_manager
 
     # ---------------------------------------------------------------------- #
     # Main cycle
@@ -202,6 +208,36 @@ class StrategyHealthEngine:
                 "name": name,
                 "live_eligibility": eligible,
             })
+            # PAPER 전략이 LIVE 조건 충족 시 PROMOTE 추천 자동 생성
+            if (
+                eligible == 1
+                and current_mode == "PAPER"
+                and self._approval_manager is not None
+            ):
+                # 이미 PENDING 추천이 있으면 중복 생성 방지
+                pending = self._approval_manager.get_pending_recommendations()
+                already = any(
+                    r.get("type") == "PROMOTE" and r.get("strategy") == name
+                    for r in pending
+                )
+                if not already:
+                    self._approval_manager.create_recommendation(
+                        type_="PROMOTE",
+                        strategy=name,
+                        current_mode="PAPER",
+                        proposed_mode="SHADOW",
+                        supporting_data={
+                            "recent_10_pf":  health.get("recent_10_pf"),
+                            "recent_20_pf":  health.get("recent_20_pf"),
+                            "recent_mdd":    health.get("recent_mdd"),
+                            "win_rate_10":   health.get("win_rate_10"),
+                        },
+                        expected_risk={"shadow_mode": True, "live_money_risk": False},
+                        rollback_condition="recent_10_pf < 1.0 이면 즉시 PAUSED",
+                    )
+                    logger.info(
+                        "[HealthEngine] PROMOTE 추천 생성: '%s' PAPER → SHADOW", name
+                    )
 
         level = {"OK": "info", "WARN": "warning", "PAUSE": "warning", "UNKNOWN": "debug"}.get(health_status, "info")
         getattr(logger, level)(
