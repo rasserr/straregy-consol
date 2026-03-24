@@ -524,6 +524,9 @@ class Engine:
 
         offset = 0
         base = f"https://api.telegram.org/bot{self._telegram._token}"
+        _last_connected_ts: int = int(time.time() * 1000)
+        _consecutive_failures: int = 0
+        _reconnect_notified: bool = False
 
         async def send_control_menu(chat_id_target: int) -> None:
             """인라인 키보드 컨트롤박스 전송."""
@@ -553,9 +556,12 @@ class Engine:
                         {"text": f"{'🔴' if mode=='ACTIVE'  else '⚪'} ACTIVE",   "callback_data": "mode:ACTIVE"},
                     ],
                     [
-                        {"text": f"🚨 Kill Switch {'[ON]' if ks else ''}",  "callback_data": "cmd:kill"},
-                        {"text": "✅ Kill Reset",  "callback_data": "cmd:reset"},
-                        {"text": "🔄 재시작",     "callback_data": "cmd:restart"},
+                        {"text": f"⛔ Soft Kill {'[ON]' if ks else ''}",    "callback_data": "cmd:kill"},
+                        {"text": f"🚨 Hard Kill {'[ON]' if ks else ''}",    "callback_data": "cmd:kill_hard"},
+                        {"text": "✅ Kill Reset",                            "callback_data": "cmd:reset"},
+                    ],
+                    [
+                        {"text": "🔄 재시작",  "callback_data": "cmd:restart"},
                     ],
                 ]
             }
@@ -590,8 +596,42 @@ class Engine:
                         logger.warning("[Telegram] Invalid token (404) — command loop disabled.")
                         return
                     if resp.status_code != 200:
+                        _consecutive_failures += 1
+                        if _consecutive_failures >= 3:
+                            _reconnect_notified = True
                         await asyncio.sleep(5)
                         continue
+
+                    # Reconnect recovery: send missed-events summary
+                    if _reconnect_notified and _consecutive_failures > 0:
+                        gap_sec = max(0, int(time.time()) - _last_connected_ts // 1000)
+                        gap_min = gap_sec // 60
+                        try:
+                            # Gather events that occurred during the outage
+                            recent_signals = self._store.get_signals(limit=5)
+                            recent_opps    = self._store.get_recent_opportunities(limit=5)
+                            ks_active      = self._kill_switch.is_active if self._kill_switch else False
+                            mode           = self._store.get_system_mode()
+                            lines = [
+                                f"*🔄 Telegram 재연결됨*",
+                                f"오프라인 시간: 약 {gap_min}분",
+                                f"현재 모드: `{mode}` | Kill: `{'활성' if ks_active else '해제'}`",
+                            ]
+                            if recent_signals:
+                                lines.append(f"\n*최근 신호 {len(recent_signals)}건:*")
+                                for s in recent_signals[:3]:
+                                    lines.append(f"  {s.get('action')} {s.get('symbol')} [{s.get('strategy')}]")
+                            if recent_opps:
+                                lines.append(f"\n*최근 기회 {len(recent_opps)}건:*")
+                                for o in recent_opps[:3]:
+                                    lines.append(f"  {o.get('side')} {o.get('symbol')} score={o.get('score_total')} [{o.get('execution_status')}]")
+                            await self._telegram.send_message("\n".join(lines))
+                        except Exception:
+                            pass
+                        _reconnect_notified = False
+
+                    _consecutive_failures = 0
+                    _last_connected_ts = int(time.time() * 1000)
 
                     data = resp.json()
                     for update in data.get("result", []):
@@ -693,13 +733,24 @@ class Engine:
                                 )
 
                             elif cq_data == "cmd:kill":
-                                await answer_callback(cq_id, "Kill Switch 활성화")
-                                await self._kill_switch.trigger(
-                                    reason="Inline button /kill via Telegram",
+                                await answer_callback(cq_id, "Soft Kill 활성화")
+                                await self._kill_switch.trigger_soft(
+                                    reason="Inline button /kill (SOFT) via Telegram",
                                     triggered_by=f"telegram:{cq_chat}",
                                 )
                                 await self._telegram.send_message(
-                                    "🚨 *Kill Switch 활성화*\n모든 신규 진입 차단됨.\n해제: ✅ Kill Reset 버튼"
+                                    "⛔ *Soft Kill 활성화*\n신규 진입 차단. 기존 포지션 SL/TP 유지.\n해제: ✅ Kill Reset 버튼"
+                                )
+                                await send_control_menu(cq_chat)
+
+                            elif cq_data == "cmd:kill_hard":
+                                await answer_callback(cq_id, "Hard Kill 활성화")
+                                await self._kill_switch.trigger_hard(
+                                    reason="Inline button /killhard via Telegram",
+                                    triggered_by=f"telegram:{cq_chat}",
+                                )
+                                await self._telegram.send_message(
+                                    "🚨 *Hard Kill 활성화*\n신규 진입 차단 + 미체결 주문 전체 취소.\n해제: ✅ Kill Reset 버튼"
                                 )
                                 await send_control_menu(cq_chat)
 
@@ -801,15 +852,28 @@ class Engine:
 
                         # ── /kill ─────────────────────────────────────────
                         elif text == "/kill":
-                            logger.warning("[Telegram] /kill from chat_id=%s", chat_id)
-                            await self._kill_switch.trigger(
-                                reason="Manual /kill via Telegram",
+                            logger.warning("[Telegram] /kill (SOFT) from chat_id=%s", chat_id)
+                            await self._kill_switch.trigger_soft(
+                                reason="Manual /kill (SOFT) via Telegram",
                                 triggered_by=f"telegram:{chat_id}",
                             )
                             await self._telegram.send_message(
-                                "🚨 *Kill Switch 활성화*\n"
-                                "모든 신규 진입이 차단됐습니다.\n"
+                                "⛔ *Soft Kill 활성화*\n"
+                                "신규 진입이 차단됐습니다.\n"
                                 "기존 포지션은 SL/TP로 보호됩니다.\n"
+                                "Hard Kill: `/killhard` | 해제: `/reset`"
+                            )
+
+                        # ── /killhard ─────────────────────────────────────
+                        elif text == "/killhard":
+                            logger.warning("[Telegram] /killhard from chat_id=%s", chat_id)
+                            await self._kill_switch.trigger_hard(
+                                reason="Manual /killhard via Telegram",
+                                triggered_by=f"telegram:{chat_id}",
+                            )
+                            await self._telegram.send_message(
+                                "🚨 *Hard Kill 활성화*\n"
+                                "신규 진입 차단 + 미체결 주문 전체 취소.\n"
                                 "해제하려면 `/reset` 을 입력하세요."
                             )
 
@@ -1127,6 +1191,9 @@ class Engine:
                     break
                 except Exception as exc:
                     logger.debug("[Telegram] Command loop error: %s", exc)
+                    _consecutive_failures += 1
+                    if _consecutive_failures >= 3:
+                        _reconnect_notified = True
                     await asyncio.sleep(5)
 
     async def _start_tunnel(self) -> None:
