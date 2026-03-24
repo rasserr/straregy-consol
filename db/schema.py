@@ -224,6 +224,79 @@ CREATE INDEX IF NOT EXISTS idx_recommendations_status_ts
     ON recommendations (status, created_at DESC);
 """
 
+DDL_OPPORTUNITIES = """
+CREATE TABLE IF NOT EXISTS opportunities (
+    id                  TEXT    PRIMARY KEY,
+    ts                  INTEGER NOT NULL,
+    symbol              TEXT    NOT NULL,
+    side                TEXT    NOT NULL,
+    source_strategy     TEXT    NOT NULL,
+    category            TEXT,
+    regime_snapshot     TEXT,
+    signal_strength     REAL,
+    funding_state       TEXT,
+    oi_state            TEXT,
+    volume_state        TEXT,
+    spread_state        TEXT,
+    volatility_state    TEXT,
+    liquidity_state     TEXT,
+    expected_hold_window TEXT,
+    invalidation_level  REAL,
+    confidence_raw      REAL,
+    score_total         INTEGER,
+    score_breakdown_json TEXT,
+    rank_global         INTEGER,
+    rank_within_symbol  INTEGER,
+    execution_status    TEXT    DEFAULT 'PENDING',
+    approved_by         TEXT,
+    approved_at         INTEGER,
+    tp                  REAL,
+    sl                  REAL,
+    signal_id           TEXT
+);
+"""
+
+DDL_OPPORTUNITIES_IDX = """
+CREATE INDEX IF NOT EXISTS idx_opportunities_ts
+    ON opportunities (ts DESC);
+CREATE INDEX IF NOT EXISTS idx_opportunities_status
+    ON opportunities (execution_status, ts DESC);
+"""
+
+DDL_OPERATOR_ACTIONS = """
+CREATE TABLE IF NOT EXISTS operator_actions (
+    id          TEXT    PRIMARY KEY,
+    ts          INTEGER NOT NULL,
+    source      TEXT    NOT NULL,   -- telegram | dashboard
+    operator    TEXT,
+    action_type TEXT    NOT NULL,
+    target_type TEXT,
+    target_id   TEXT,
+    reason      TEXT,
+    result      TEXT
+);
+"""
+
+DDL_OPERATOR_ACTIONS_IDX = """
+CREATE INDEX IF NOT EXISTS idx_operator_actions_ts
+    ON operator_actions (ts DESC);
+"""
+
+DDL_TELEGRAM_EVENTS = """
+CREATE TABLE IF NOT EXISTS telegram_events (
+    id                  TEXT    PRIMARY KEY,
+    ts                  INTEGER NOT NULL,
+    chat_id             TEXT,
+    event_type          TEXT    NOT NULL,
+    payload_json        TEXT,
+    related_entity_type TEXT,
+    related_entity_id   TEXT,
+    action_status       TEXT    DEFAULT 'PENDING',
+    ack_by              TEXT,
+    ack_ts              INTEGER
+);
+"""
+
 ALL_DDL = [
     DDL_CANDLES, DDL_CANDLES_IDX,
     DDL_TICKERS, DDL_TICKERS_IDX,
@@ -236,10 +309,30 @@ ALL_DDL = [
     DDL_STRATEGY_STATE,
     DDL_PAPER_POSITIONS, DDL_PAPER_POSITIONS_IDX,
     DDL_RECOMMENDATIONS, DDL_RECOMMENDATIONS_IDX,
+    DDL_OPPORTUNITIES, DDL_OPPORTUNITIES_IDX,
+    DDL_OPERATOR_ACTIONS, DDL_OPERATOR_ACTIONS_IDX,
+    DDL_TELEGRAM_EVENTS,
 ]
 
 # Phase 3 migration: add new columns to existing tables
 # Safe to run on any DB version — ALTER TABLE IF NOT EXISTS columns
+V13_MIGRATIONS = [
+    # signals 테이블 확장
+    "ALTER TABLE signals ADD COLUMN normalized_category TEXT",
+    "ALTER TABLE signals ADD COLUMN score_total INTEGER",
+    "ALTER TABLE signals ADD COLUMN score_breakdown_json TEXT",
+    "ALTER TABLE signals ADD COLUMN opportunity_id TEXT",
+    # strategy_state 확장
+    "ALTER TABLE strategy_state ADD COLUMN recent_10_pf REAL",
+    "ALTER TABLE strategy_state ADD COLUMN recent_20_pf REAL",
+    "ALTER TABLE strategy_state ADD COLUMN recent_expectancy REAL",
+    "ALTER TABLE strategy_state ADD COLUMN recent_mdd REAL",
+    "ALTER TABLE strategy_state ADD COLUMN health_status TEXT DEFAULT 'OK'",
+    "ALTER TABLE strategy_state ADD COLUMN live_eligibility INTEGER DEFAULT 0",
+    "ALTER TABLE strategy_state ADD COLUMN last_pause_reason TEXT",
+    "ALTER TABLE strategy_state ADD COLUMN last_health_update_ts INTEGER",
+]
+
 PHASE3_MIGRATIONS = [
     "ALTER TABLE orders ADD COLUMN binance_order_id TEXT",
     "ALTER TABLE orders ADD COLUMN strategy TEXT",
@@ -275,8 +368,8 @@ def init_db(db_path: str) -> sqlite3.Connection:
         cursor.executescript(ddl)
     conn.commit()
 
-    # Phase 3 migrations (safe — ignore errors for columns that already exist)
-    for migration in PHASE3_MIGRATIONS:
+    # Phase 3 + v1.3 migrations (safe — ignore errors for columns that already exist)
+    for migration in PHASE3_MIGRATIONS + V13_MIGRATIONS:
         try:
             cursor.execute(migration)
             conn.commit()

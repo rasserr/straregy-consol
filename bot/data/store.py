@@ -900,6 +900,105 @@ class DataStore:
                     logger.error("SQLite strategy state update error: %s", exc)
 
     # ---------------------------------------------------------------------- #
+    # v1.3 — Opportunities
+    # ---------------------------------------------------------------------- #
+
+    def save_opportunity(self, opp: dict) -> None:
+        """Persist an Opportunity record."""
+        import json as _json
+        try:
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO opportunities
+                    (id, ts, symbol, side, source_strategy, category,
+                     regime_snapshot, signal_strength, funding_state, oi_state,
+                     volume_state, spread_state, volatility_state, liquidity_state,
+                     expected_hold_window, invalidation_level, confidence_raw,
+                     score_total, score_breakdown_json, rank_global,
+                     rank_within_symbol, execution_status, approved_by, approved_at,
+                     tp, sl, signal_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    opp.get("id"),
+                    opp.get("ts"),
+                    opp.get("symbol"),
+                    opp.get("side"),
+                    opp.get("source_strategy"),
+                    opp.get("category"),
+                    opp.get("regime_snapshot"),
+                    opp.get("signal_strength"),
+                    opp.get("funding_state"),
+                    opp.get("oi_state"),
+                    opp.get("volume_state"),
+                    opp.get("spread_state"),
+                    opp.get("volatility_state"),
+                    opp.get("liquidity_state"),
+                    opp.get("expected_hold_window"),
+                    opp.get("invalidation_level"),
+                    opp.get("confidence_raw"),
+                    opp.get("score_total"),
+                    _json.dumps(opp.get("score_breakdown", {})),
+                    opp.get("rank_global"),
+                    opp.get("rank_within_symbol"),
+                    opp.get("execution_status", "PENDING"),
+                    opp.get("approved_by"),
+                    opp.get("approved_at"),
+                    opp.get("tp"),
+                    opp.get("sl"),
+                    opp.get("signal_id"),
+                ),
+            )
+            self._conn.commit()
+        except Exception as exc:
+            logger.error("SQLite opportunity insert error: %s", exc)
+
+    def save_operator_action(self, action: dict) -> None:
+        """Persist an operator action to operator_actions table."""
+        import uuid as _uuid
+        try:
+            self._conn.execute(
+                """
+                INSERT OR IGNORE INTO operator_actions
+                    (id, ts, source, operator, action_type,
+                     target_type, target_id, reason, result)
+                VALUES (?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    action.get("id", str(_uuid.uuid4())),
+                    action.get("ts", int(time.time() * 1000)),
+                    action.get("source", "telegram"),
+                    action.get("operator"),
+                    action.get("action_type"),
+                    action.get("target_type"),
+                    action.get("target_id"),
+                    action.get("reason"),
+                    action.get("result"),
+                ),
+            )
+            self._conn.commit()
+        except Exception as exc:
+            logger.error("SQLite operator_action insert error: %s", exc)
+
+    def get_recent_opportunities(self, limit: int = 10, status: str = "") -> list:
+        """최근 Opportunity 조회."""
+        try:
+            if status:
+                rows = self._conn.execute(
+                    "SELECT * FROM opportunities WHERE execution_status=? ORDER BY ts DESC LIMIT ?",
+                    (status, limit),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM opportunities ORDER BY ts DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception as exc:
+            logger.error("SQLite opportunities fetch error: %s", exc)
+            return []
+
+    # ---------------------------------------------------------------------- #
     # Phase 4 — Reviews (daily + weekly)
     # ---------------------------------------------------------------------- #
 

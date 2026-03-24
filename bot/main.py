@@ -539,8 +539,13 @@ class Engine:
                     ],
                     [
                         {"text": "🌐 시장국면", "callback_data": "cmd:regime"},
-                        {"text": "🧠 전략성과", "callback_data": "cmd:strategies"},
-                        {"text": "📱 URL",     "callback_data": "cmd:url"},
+                        {"text": "🧠 전략성과",  "callback_data": "cmd:strategies"},
+                        {"text": "📱 URL",      "callback_data": "cmd:url"},
+                    ],
+                    [
+                        {"text": "📋 기회목록",  "callback_data": "cmd:opportunities"},
+                        {"text": "📊 일간리포트","callback_data": "cmd:report_daily"},
+                        {"text": "📅 주간리포트","callback_data": "cmd:report_weekly"},
                     ],
                     [
                         {"text": f"{'🔴' if mode=='OBSERVE' else '⚪'} OBSERVE",  "callback_data": "mode:OBSERVE"},
@@ -721,6 +726,54 @@ class Engine:
                                     time.sleep(0.5)
                                     os._exit(0)
                                 __import__("threading").Thread(target=_do_restart_cb, daemon=True).start()
+
+                            elif cq_data == "cmd:opportunities":
+                                await answer_callback(cq_id)
+                                opps = self._store.get_recent_opportunities(limit=5, status="PENDING") if self._store else []
+                                if not opps:
+                                    await self._telegram.send_message("📋 현재 실행 후보 기회가 없습니다.")
+                                else:
+                                    import json as _j
+                                    lines = ["*📋 실행 후보*\n"]
+                                    for o in opps:
+                                        bkd = {}
+                                        try:
+                                            bkd = _j.loads(o.get("score_breakdown_json") or "{}")
+                                        except Exception:
+                                            pass
+                                        bkd_str = ", ".join(f"{k}:{v:+d}" for k, v in list(bkd.items())[:3])
+                                        lines.append(
+                                            f"`{o['symbol']}` {o['side']} [{o['category']}] "
+                                            f"스코어:`{o['score_total']}` ({bkd_str})"
+                                        )
+                                    await self._telegram.send_message("\n".join(lines))
+
+                            elif cq_data == "cmd:report_daily":
+                                await answer_callback(cq_id)
+                                dpnl, dp = self._store.get_daily_pnl()
+                                stats = self._store.get_strategy_stats()
+                                total_trades = sum(s.get("trade_count", 0) for s in stats.values())
+                                sign = "+" if dpnl >= 0 else ""
+                                await self._telegram.send_message(
+                                    f"*📊 오늘 요약*\n\n"
+                                    f"손익: `{sign}{dpnl:.2f} USDT ({sign}{dp:.2f}%)`\n"
+                                    f"거래 수: `{total_trades}`회\n"
+                                    f"레짐: `{(self._store.get_regime() or {}).get('regime','UNKNOWN')}`"
+                                )
+
+                            elif cq_data == "cmd:report_weekly":
+                                await answer_callback(cq_id)
+                                stats = self._store.get_strategy_stats()
+                                lines = ["*📅 주간 전략 요약*\n"]
+                                for name_s, st in stats.items():
+                                    lines.append(
+                                        f"`{name_s}`: {st.get('trade_count',0)}건 "
+                                        f"승률{st.get('win_rate',0)*100:.0f}% "
+                                        f"PF:{st.get('profit_factor','—')}"
+                                    )
+                                await self._telegram.send_message(
+                                    "\n".join(lines) if len(lines) > 1 else "데이터 없음"
+                                )
 
                             continue  # callback_query 처리 완료, message 처리 건너뜀
 
@@ -946,6 +999,105 @@ class Engine:
                                 time.sleep(0.5)
                                 os._exit(0)
                             __import__("threading").Thread(target=_do_restart, daemon=True).start()
+
+                        # ── /opportunities ────────────────────────────────
+                        elif text == "/opportunities":
+                            opps = self._store.get_recent_opportunities(limit=5, status="PENDING") if self._store else []
+                            if not opps:
+                                await self._telegram.send_message("📋 현재 실행 후보 기회가 없습니다.")
+                            else:
+                                lines = ["*📋 실행 후보 Top 5*\n"]
+                                for o in opps:
+                                    import json as _j
+                                    bkd = {}
+                                    try:
+                                        bkd = _j.loads(o.get("score_breakdown_json") or "{}")
+                                    except Exception:
+                                        pass
+                                    bkd_str = ", ".join(f"{k}:{v:+d}" for k, v in list(bkd.items())[:3])
+                                    lines.append(
+                                        f"`{o['symbol']}` {o['side']} [{o['category']}]\n"
+                                        f"  스코어: `{o['score_total']}` ({bkd_str})\n"
+                                        f"  보유: {o.get('expected_hold_window','—')}"
+                                    )
+                                await self._telegram.send_message("\n".join(lines))
+
+                        # ── /close [position_id] ──────────────────────────
+                        elif text.startswith("/close"):
+                            if len(parts) < 2:
+                                await self._telegram.send_message(
+                                    "사용법: `/close [position_id]\n`\n"
+                                    "position_id는 `/positions` 에서 확인하세요."
+                                )
+                            else:
+                                pos_id = parts[1]
+                                # PaperRecorder에서 포지션 찾기
+                                if self._strategy_manager:
+                                    recorder = self._strategy_manager.recorder
+                                    pos = recorder._open.get(pos_id)
+                                    if pos:
+                                        entry_price = pos.entry_price
+                                        ticker = self._store.get_ticker(pos.symbol)
+                                        exit_price = float(ticker.get("price", entry_price)) if ticker else entry_price
+                                        recorder._close_position(pos, exit_price, f"Manual close by {chat_id}")
+                                        # Audit 기록
+                                        self._store.save_operator_action({
+                                            "source": "telegram",
+                                            "operator": str(chat_id),
+                                            "action_type": "CLOSE_POSITION",
+                                            "target_type": "paper_position",
+                                            "target_id": pos_id,
+                                            "reason": "manual close via /close",
+                                            "result": f"closed at {exit_price}",
+                                        })
+                                        await self._telegram.send_message(
+                                            f"✅ 포지션 종료됨\n"
+                                            f"`{pos.symbol}` {pos.side} @ `{exit_price:.4f}`"
+                                        )
+                                    else:
+                                        await self._telegram.send_message(f"❌ 포지션 `{pos_id}` 를 찾을 수 없습니다.")
+                                else:
+                                    await self._telegram.send_message("전략 관리자가 초기화되지 않았습니다.")
+
+                        # ── /report_daily ─────────────────────────────────
+                        elif text == "/report_daily":
+                            if self._daily_reviewer is not None:
+                                await self._telegram.send_message("📊 일간 리뷰를 즉시 실행합니다...")
+                                asyncio.create_task(
+                                    self._daily_reviewer.run(),
+                                    name="manual_daily_review",
+                                )
+                            else:
+                                # AI 없이 간단 요약
+                                dpnl, dp = self._store.get_daily_pnl()
+                                stats = self._store.get_strategy_stats()
+                                total_trades = sum(s.get("trade_count", 0) for s in stats.values())
+                                sign = "+" if dpnl >= 0 else ""
+                                await self._telegram.send_message(
+                                    f"*📊 오늘 요약*\n\n"
+                                    f"손익: `{sign}{dpnl:.2f} USDT ({sign}{dp:.2f}%)`\n"
+                                    f"거래 수: `{total_trades}`회\n"
+                                    f"레짐: `{(self._store.get_regime() or {}).get('regime','UNKNOWN')}`"
+                                )
+
+                        # ── /report_weekly ────────────────────────────────
+                        elif text == "/report_weekly":
+                            if self._weekly_reviewer is not None:
+                                await self._telegram.send_message("📅 주간 리뷰를 즉시 실행합니다...")
+                                asyncio.create_task(
+                                    self._weekly_reviewer.run(),
+                                    name="manual_weekly_review",
+                                )
+                            else:
+                                stats = self._store.get_strategy_stats()
+                                lines = ["*📅 주간 전략 요약*\n"]
+                                for name_s, st in stats.items():
+                                    lines.append(
+                                        f"`{name_s}`: {st.get('trade_count',0)}건 "
+                                        f"승률{st.get('win_rate',0)*100:.0f}% "
+                                        f"PF:{st.get('profit_factor','—')}"
+                                    )
+                                await self._telegram.send_message("\n".join(lines) if lines else "데이터 없음")
 
                 except asyncio.CancelledError:
                     break
