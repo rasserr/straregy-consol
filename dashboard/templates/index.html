@@ -683,6 +683,44 @@
   </div>
 
   <!-- -------------------------------------------------------- -->
+  <!-- PANEL: STRATEGY VALIDATION                                -->
+  <!-- -------------------------------------------------------- -->
+  <div class="panel" id="panel-validation">
+    <div class="panel-header">
+      <span class="panel-title">🔍 Strategy Validation — 실전 진입 검증</span>
+      <div class="panel-controls">
+        <span id="validation-last-updated" class="panel-subtitle"></span>
+        <button class="btn-sm" onclick="refreshValidation()">새로고침</button>
+      </div>
+    </div>
+
+    <!-- 게이트 요약 -->
+    <div class="validation-gate-bar" id="validation-gate-bar">
+      <div class="validation-gate-item">
+        <span class="gate-label">SHADOW 기준</span>
+        <span class="gate-value" id="gate-shadow-value">점수 ≥50 · 거래 ≥30회</span>
+      </div>
+      <div class="validation-gate-item">
+        <span class="gate-label">LIVE 기준</span>
+        <span class="gate-value" id="gate-live-value">점수 ≥75 · 거래 ≥50회</span>
+      </div>
+      <div class="validation-gate-item">
+        <span class="gate-label">LIVE 준비 완료</span>
+        <span class="gate-value highlight-green" id="gate-live-ready-count">0개</span>
+      </div>
+      <div class="validation-gate-item">
+        <span class="gate-label">SHADOW 준비 완료</span>
+        <span class="gate-value highlight-yellow" id="gate-shadow-ready-count">0개</span>
+      </div>
+    </div>
+
+    <!-- 전략별 카드 그리드 -->
+    <div class="validation-grid" id="validation-grid">
+      <div class="loading-placeholder">데이터 로딩 중...</div>
+    </div>
+  </div>
+
+  <!-- -------------------------------------------------------- -->
   <!-- PANEL 5: TRADE LOG                                        -->
   <!-- -------------------------------------------------------- -->
   <div class="panel" id="panel-trade-log">

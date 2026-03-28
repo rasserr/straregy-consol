@@ -1582,6 +1582,7 @@ class Engine:
             weekly_reviewer=self._weekly_reviewer,
             engine=self,
             approval_manager=self._approval_manager,
+            validation_tracker=self._validation_tracker,
         )
 
         config = uvicorn.Config(

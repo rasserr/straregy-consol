@@ -83,6 +83,7 @@ def create_app(
     weekly_reviewer=None,
     engine=None,
     approval_manager=None,
+    validation_tracker=None,
 ) -> FastAPI:
     """Factory that creates the FastAPI app with injected dependencies."""
 
@@ -1116,6 +1117,85 @@ def create_app(
             "expectancy_usd":   round(expectancy_usd, 2),
             "per_strategy":     per_strategy_result,
             "equity_curve":     equity_curve,
+        })
+
+    # ------------------------------------------------------------------ #
+    # Strategy Validation
+    # ------------------------------------------------------------------ #
+
+    @app.get("/api/validation")
+    async def api_validation():
+        """
+        Per-strategy validation snapshots + readiness scores.
+        Returns latest snapshot per strategy + history (last 20 per strategy).
+        """
+        from bot.strategies.validation_tracker import (
+            ValidationTracker, SHADOW_SCORE_THRESHOLD, LIVE_SCORE_THRESHOLD,
+        )
+
+        # Latest snapshots from DB
+        latest = store.get_latest_validation_snapshots()
+
+        # If validation_tracker is injected, also use it to enrich with current score
+        strategies_out = []
+        strategy_list = strategy_manager.get_strategy_list() if strategy_manager else []
+        stats = store.get_strategy_stats()
+
+        for s in strategy_list:
+            name = s["name"]
+            mode = s.get("mode", "PAPER")
+            snap = latest.get(name, {})
+            st   = stats.get(name, {})
+
+            trade_count = st.get("trade_count", 0)
+            win_rate    = st.get("win_rate", None)
+            pf          = snap.get("recent_10_pf") or None
+            mdd         = snap.get("max_drawdown") or st.get("mdd") or None
+            expectancy  = snap.get("expectancy") or st.get("expectancy") or None
+            health      = s.get("health_status", "UNKNOWN")
+            score       = snap.get("validation_score")
+
+            if score is None:
+                score = ValidationTracker.compute_validation_score({
+                    "trade_count":     trade_count,
+                    "recent_10_pf":    pf,
+                    "win_rate_10":     win_rate or 0,
+                    "recent_mdd":      mdd or 0,
+                    "recent_expectancy": expectancy or 0,
+                    "health_status":   health,
+                })
+
+            # History (last 20 snapshots for sparkline)
+            history = store.get_validation_snapshots(name, limit=20)
+            score_history = [h.get("validation_score", 0) for h in reversed(history)]
+
+            strategies_out.append({
+                "name":               name,
+                "mode":               mode,
+                "health_status":      health,
+                "validation_score":   score,
+                "trade_count":        trade_count,
+                "win_rate":           round(win_rate, 4) if win_rate is not None else None,
+                "profit_factor":      round(pf, 3) if pf is not None else None,
+                "max_drawdown":       round(mdd, 2) if mdd is not None else None,
+                "expectancy":         round(expectancy, 4) if expectancy is not None else None,
+                "meets_shadow":       score >= SHADOW_SCORE_THRESHOLD and trade_count >= 30,
+                "meets_live":         score >= LIVE_SCORE_THRESHOLD   and trade_count >= 50,
+                "last_snapshot_ts":   snap.get("ts"),
+                "score_history":      score_history,
+            })
+
+        # Sort: LIVE-ready first, then SHADOW-ready, then by score desc
+        strategies_out.sort(key=lambda x: (
+            not x["meets_live"],
+            not x["meets_shadow"],
+            -x["validation_score"],
+        ))
+
+        return JSONResponse({
+            "shadow_threshold": SHADOW_SCORE_THRESHOLD,
+            "live_threshold":   LIVE_SCORE_THRESHOLD,
+            "strategies":       strategies_out,
         })
 
     # ------------------------------------------------------------------ #

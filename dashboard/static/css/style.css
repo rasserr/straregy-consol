@@ -2187,3 +2187,148 @@ details[open] .history-summary::before {
   transition: background .15s, color .15s;
 }
 .rec-btn-reject:hover { background: rgba(239,68,68,.1); color: var(--red); border-color: var(--red); }
+
+/* ============================================================
+   Strategy Validation Panel
+   ============================================================ */
+
+/* 상단 게이트 요약 바 */
+.validation-gate-bar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.validation-gate-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 130px;
+}
+.gate-label  { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+.gate-value  { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+
+/* 카드 그리드 */
+.validation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+/* 개별 검증 카드 */
+.val-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color .2s;
+}
+.val-card:hover { border-color: var(--border-light); }
+.val-card.live-ready   { border-left: 3px solid var(--green); }
+.val-card.shadow-ready { border-left: 3px solid var(--yellow); }
+.val-card.needs-data   { border-left: 3px solid var(--border); }
+.val-card.paused       { opacity: .5; }
+
+/* 카드 헤더 */
+.val-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.val-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+.val-card-badges {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.val-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.val-badge.live-ready   { background: rgba(34,197,94,.15);  color: var(--green);  border: 1px solid rgba(34,197,94,.3);  }
+.val-badge.shadow-ready { background: rgba(245,158,11,.15); color: var(--yellow); border: 1px solid rgba(245,158,11,.3); }
+.val-badge.mode-paper   { background: rgba(99,102,241,.12); color: #818cf8;       border: 1px solid rgba(99,102,241,.25); }
+.val-badge.mode-shadow  { background: rgba(245,158,11,.12); color: var(--yellow); border: 1px solid rgba(245,158,11,.25); }
+.val-badge.mode-live    { background: rgba(34,197,94,.12);  color: var(--green);  border: 1px solid rgba(34,197,94,.25);  }
+.val-badge.mode-paused  { background: rgba(100,116,139,.12); color: var(--text-muted); border: 1px solid rgba(100,116,139,.2); }
+
+/* 점수 바 */
+.val-score-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.val-score-num {
+  font-size: 20px;
+  font-weight: 800;
+  min-width: 46px;
+  line-height: 1;
+}
+.val-score-num.live-ready   { color: var(--green); }
+.val-score-num.shadow-ready { color: var(--yellow); }
+.val-score-num.needs-data   { color: var(--text-muted); }
+.val-score-bar-wrap {
+  flex: 1;
+  height: 6px;
+  background: rgba(255,255,255,.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.val-score-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .4s ease;
+}
+.val-score-bar-fill.live-ready   { background: var(--green); }
+.val-score-bar-fill.shadow-ready { background: var(--yellow); }
+.val-score-bar-fill.needs-data   { background: var(--text-muted); }
+.val-score-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  min-width: 34px;
+  text-align: right;
+}
+
+/* 메트릭 그리드 */
+.val-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px 10px;
+}
+.val-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.val-metric-label { font-size: 10px; color: var(--text-muted); }
+.val-metric-value { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+
+/* 하단 진입까지 남은 조건 */
+.val-progress {
+  font-size: 11px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.val-progress span { display: flex; align-items: center; gap: 4px; }
+.val-progress .val-done { color: var(--green); }

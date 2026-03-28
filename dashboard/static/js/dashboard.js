@@ -2727,3 +2727,153 @@ loadRegimeOverride();
 loadExchangeMode();
 loadStrategyRecommendations();
 setInterval(loadStrategyRecommendations, 5 * 60 * 1000);  // 5분마다 갱신
+
+// ============================================================
+// Strategy Validation Panel
+// ============================================================
+
+async function refreshValidation() {
+  try {
+    const res = await fetch('/api/validation');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderValidation(data);
+  } catch(e) {
+    console.warn('[Validation] fetch error', e);
+  }
+}
+
+function renderValidation(data) {
+  const strategies   = data.strategies || [];
+  const shadowThresh = data.shadow_threshold || 50;
+  const liveThresh   = data.live_threshold   || 75;
+
+  // 게이트 카운터
+  const liveReadyCount   = strategies.filter(s => s.meets_live).length;
+  const shadowReadyCount = strategies.filter(s => s.meets_shadow && !s.meets_live).length;
+
+  setText('gate-live-ready-count',   liveReadyCount + '개');
+  setText('gate-shadow-ready-count', shadowReadyCount + '개');
+  setText('gate-shadow-value', `점수 ≥${shadowThresh} · 거래 ≥30회`);
+  setText('gate-live-value',   `점수 ≥${liveThresh} · 거래 ≥50회`);
+
+  // 마지막 갱신 시각
+  const now = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  setText('validation-last-updated',
+    `${pad(now.getHours())}:${pad(now.getMinutes())} 갱신`);
+
+  // 카드 그리드 렌더링
+  const grid = document.getElementById('validation-grid');
+  if (!grid) return;
+
+  if (!strategies.length) {
+    grid.innerHTML = '<div class="loading-placeholder">전략 없음</div>';
+    return;
+  }
+
+  const cards = strategies.map(s => {
+    const score = s.validation_score || 0;
+    const tc    = s.trade_count || 0;
+    const mode  = (s.mode || 'PAPER').toUpperCase();
+    const health = s.health_status || 'UNKNOWN';
+
+    // 상태 클래스
+    let cardClass  = 'needs-data';
+    let scoreClass = 'needs-data';
+    let gateBadge  = '';
+    if (mode === 'PAUSED') {
+      cardClass = 'paused';
+    } else if (s.meets_live) {
+      cardClass  = 'live-ready';
+      scoreClass = 'live-ready';
+      gateBadge  = '<span class="val-badge live-ready">✅ LIVE 가능</span>';
+    } else if (s.meets_shadow) {
+      cardClass  = 'shadow-ready';
+      scoreClass = 'shadow-ready';
+      gateBadge  = '<span class="val-badge shadow-ready">🟡 SHADOW 가능</span>';
+    }
+
+    // 모드 배지
+    const modeLower = mode.toLowerCase();
+    const modeBadge = `<span class="val-badge mode-${modeLower}">${mode}</span>`;
+
+    // 점수 바
+    const barPct = Math.min(score, 100);
+    const scoreBar = `
+      <div class="val-score-row">
+        <span class="val-score-num ${scoreClass}">${score}</span>
+        <div class="val-score-bar-wrap">
+          <div class="val-score-bar-fill ${scoreClass}" style="width:${barPct}%"></div>
+        </div>
+        <span class="val-score-label">/100</span>
+      </div>`;
+
+    // 메트릭
+    const wr  = s.win_rate  != null ? (s.win_rate * 100).toFixed(0) + '%' : 'N/A';
+    const pf  = s.profit_factor != null ? s.profit_factor.toFixed(2) : 'N/A';
+    const mdd = s.max_drawdown  != null ? s.max_drawdown.toFixed(1) + '%' : 'N/A';
+    const exp = s.expectancy    != null ? s.expectancy.toFixed(4)  : 'N/A';
+
+    // 건강도 색상
+    const healthColor = health === 'OK' ? 'highlight-green'
+                      : health === 'WARN' ? 'highlight-yellow'
+                      : health === 'PAUSE' ? 'highlight-red'
+                      : '';
+
+    const metrics = `
+      <div class="val-metrics">
+        <div class="val-metric"><span class="val-metric-label">거래 수</span><span class="val-metric-value">${tc}회</span></div>
+        <div class="val-metric"><span class="val-metric-label">승률</span><span class="val-metric-value">${wr}</span></div>
+        <div class="val-metric"><span class="val-metric-label">PF10</span><span class="val-metric-value">${pf}</span></div>
+        <div class="val-metric"><span class="val-metric-label">MDD</span><span class="val-metric-value">${mdd}</span></div>
+        <div class="val-metric"><span class="val-metric-label">기댓값</span><span class="val-metric-value">${exp}</span></div>
+        <div class="val-metric"><span class="val-metric-label">헬스</span><span class="val-metric-value ${healthColor}">${health}</span></div>
+      </div>`;
+
+    // 진입까지 남은 조건
+    let progressLines = '';
+    if (mode !== 'PAUSED') {
+      const needTcShadow = Math.max(0, 30 - tc);
+      const needTcLive   = Math.max(0, 50 - tc);
+      const needScShadow = Math.max(0, shadowThresh - score);
+      const needScLive   = Math.max(0, liveThresh   - score);
+
+      if (s.meets_live) {
+        progressLines = '<span class="val-done">✅ LIVE 진입 기준 충족</span>';
+      } else if (s.meets_shadow) {
+        const parts = [];
+        if (needTcLive  > 0) parts.push(`거래 +${needTcLive}회`);
+        if (needScLive  > 0) parts.push(`점수 +${needScLive}점`);
+        progressLines = `<span>🔴 LIVE까지: ${parts.join(' · ')} 필요</span>`;
+      } else {
+        const pSh = [], pLv = [];
+        if (needTcShadow > 0) pSh.push(`거래 +${needTcShadow}회`);
+        if (needScShadow > 0) pSh.push(`점수 +${needScShadow}점`);
+        if (needTcLive   > 0) pLv.push(`거래 +${needTcLive}회`);
+        if (needScLive   > 0) pLv.push(`점수 +${needScLive}점`);
+        progressLines = [
+          pSh.length ? `<span>🟡 SHADOW까지: ${pSh.join(' · ')} 필요</span>` : '',
+          pLv.length ? `<span>🔴 LIVE까지: ${pLv.join(' · ')} 필요</span>` : '',
+        ].filter(Boolean).join('');
+      }
+    }
+
+    return `
+      <div class="val-card ${cardClass}">
+        <div class="val-card-header">
+          <span class="val-card-name">${escHtml(s.name)}</span>
+          <div class="val-card-badges">${gateBadge}${modeBadge}</div>
+        </div>
+        ${scoreBar}
+        ${metrics}
+        ${progressLines ? `<div class="val-progress">${progressLines}</div>` : ''}
+      </div>`;
+  }).join('');
+
+  grid.innerHTML = cards;
+}
+
+// 초기 로드 및 60초마다 갱신
+refreshValidation();
+setInterval(refreshValidation, 60 * 1000);
