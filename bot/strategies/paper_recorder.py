@@ -138,6 +138,38 @@ class PaperRecorder:
         self._open: Dict[str, PaperPosition] = {}
         # Replay clock: set by replay loop to use candle ts instead of wall-clock
         self._replay_ts_ms: Optional[int] = None
+        # Restore open positions from DB (survive restarts)
+        self._restore_open_positions()
+
+    def _restore_open_positions(self) -> None:
+        """Reload OPEN paper positions from DB into memory (called on init to survive restarts)."""
+        try:
+            rows = self._store.get_open_paper_positions()
+            for r in rows:
+                pos = PaperPosition(
+                    id=r["id"],
+                    strategy=r["strategy"],
+                    symbol=r["symbol"],
+                    side=r["side"],
+                    entry_price=float(r["entry_price"]),
+                    qty=float(r.get("qty", 1.0)),
+                    tp=float(r["tp"]) if r.get("tp") is not None else None,
+                    sl=float(r["sl"]) if r.get("sl") is not None else None,
+                    opened_at=int(r["opened_at"]),
+                    regime=r.get("regime", "UNKNOWN") or "UNKNOWN",
+                    signal_id=r.get("signal_id", "") or "",
+                    expiry_ts=int(r["expiry_ts"]) if r.get("expiry_ts") is not None else None,
+                    time_stop_policy=r.get("time_stop_policy", "") or "",
+                    status="OPEN",
+                    be_stop_activated=int(r.get("be_stop_activated", 0)),
+                )
+                self._open[pos.id] = pos
+            if rows:
+                logger.info(
+                    "[PaperRecorder] Restored %d open position(s) from DB", len(rows)
+                )
+        except Exception as exc:
+            logger.error("[PaperRecorder] Failed to restore open positions: %s", exc)
 
     def set_replay_ts(self, ts_ms: int) -> None:
         """Inject current candle timestamp for replay mode."""
