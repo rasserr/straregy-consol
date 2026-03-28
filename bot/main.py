@@ -677,14 +677,17 @@ class Engine:
                         {"text": "📂 포지션",  "callback_data": "cmd:positions"},
                     ],
                     [
-                        {"text": "🌐 시장국면", "callback_data": "cmd:regime"},
+                        {"text": "🌐 시장국면",  "callback_data": "cmd:regime"},
                         {"text": "🧠 전략성과",  "callback_data": "cmd:strategies"},
-                        {"text": "📱 URL",      "callback_data": "cmd:url"},
+                        {"text": "🔍 전략검증",  "callback_data": "cmd:validation"},
                     ],
                     [
                         {"text": "📋 기회목록",  "callback_data": "cmd:opportunities"},
                         {"text": "📊 일간리포트","callback_data": "cmd:report_daily"},
                         {"text": "📅 주간리포트","callback_data": "cmd:report_weekly"},
+                    ],
+                    [
+                        {"text": "📱 URL",      "callback_data": "cmd:url"},
                     ],
                     [
                         {"text": f"{'🔴' if mode=='OBSERVE' else '⚪'} OBSERVE",  "callback_data": "mode:OBSERVE"},
@@ -874,6 +877,14 @@ class Engine:
                                     st   = stats.get(name, {})
                                     lines.append(f"`{name}` [{s.get('mode','—')}] 승률:{st.get('win_rate',0):.1f}% 거래:{st.get('trade_count',0)}회")
                                 await self._telegram.send_message("\n".join(lines) if lines else "전략 없음")
+
+                            elif cq_data == "cmd:validation":
+                                await answer_callback(cq_id)
+                                if self._validation_tracker is not None:
+                                    report = self._validation_tracker.build_validation_report()
+                                    await self._telegram.send_message(report)
+                                else:
+                                    await self._telegram.send_message("검증 트래커가 초기화되지 않았습니다.")
 
                             elif cq_data == "cmd:url":
                                 await answer_callback(cq_id)
